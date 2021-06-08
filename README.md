@@ -9,7 +9,7 @@ This code was developed for the Jetson Nano development kit. It utilizes:
 - Jetpack 4.2.1
 - OpenCV 3.3.1 (and it's dependencies)
 - A UVC compliant webcam
-- GNU Make 
+- GNU toolchain (g++, make, etc.)
 
 For Jetson setup, see [Getting Started with Jetson Nano](https://developer.nvidia.com/embedded/learn/get-started-jetson-nano-devkit#intro).
 
