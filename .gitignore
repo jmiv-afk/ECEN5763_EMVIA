@@ -1,0 +1,5 @@
+# add ignore files here
+
+# ignore all object files and output executables
+*.o
+*.out
