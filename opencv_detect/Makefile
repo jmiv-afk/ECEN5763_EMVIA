@@ -11,7 +11,7 @@ OBJS= $(SRCS:.cpp=.o)
 CFLAGS= -Wall -O3 -g $(INCDIR) 
 LDFLAGS= -lm -lopencv_core -lopencv_flann -lopencv_video -lrt  
 
-TARGET= a.out
+TARGET= opencv_detect.out
 
 $(TARGET): $(OBJS)
 	$(CPP) -o $@ $(OBJS) $(LIBDIR) $(LDFLAGS) 
