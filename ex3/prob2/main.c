@@ -57,8 +57,8 @@ int main(int argc, char** argv)  {
   }
 
   // free memory allocated with malloc()
-  yeet_ppm(ppm);
-  yeet_pgm(pgm);
+  yeet_ppm(&ppm);
+  yeet_pgm(&pgm);
 
   return 0;
 } // end main

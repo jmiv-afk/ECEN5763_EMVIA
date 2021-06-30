@@ -15,6 +15,38 @@
 #include"imageproc.h"
 
 // see .h for more details
+int rgb_diff(ppm_img_t *const frame, ppm_img_t *const bg, ppm_img_t *diff) {
+  
+  int i;
+  int temp;
+  if (!frame || !bg || !diff) return -1;
+
+  // use openmp for speedup:
+#pragma omp parallel for num_threads(5) \
+  default(none) private(i, temp) shared(diff)
+  for (i=0; i<bg->hres*bg->vres; i++) {
+
+    // rgb subtraction on ea. channel and keep within 0-255 intensity
+    temp = frame->pixel[i].r - bg->pixel[i].r;
+    if (temp < 0) temp = 0;
+    if (temp > 255) temp = 255;
+    diff->pixel[i].r = temp;
+
+    temp = frame->pixel[i].g - bg->pixel[i].g;
+    if (temp < 0) temp = 0;
+    if (temp > 255) temp = 255;
+    diff->pixel[i].g = temp;
+
+    temp = frame->pixel[i].b - bg->pixel[i].b;
+    if (temp < 0) temp = 0;
+    if (temp > 255) temp = 255;
+    diff->pixel[i].b = temp;
+    
+  }
+  return 0;
+}
+
+// see .h for more details
 int kernel_3x3(int i0, int j0, pgm_img_t *pgm, uint8_t *P) {
 
   if (i0<1 || j0<1 || !pgm || !P) {
