@@ -26,6 +26,7 @@ clean:
 	rm -f $(OBJS) $(TARGET)
 	
 run:
+	make
 	mkdir -p PGM_out
 	rm -rf PGM_out/*
 	./graymap.out 
@@ -37,10 +38,10 @@ encode:
 decode:
 	echo "Generating folder and decoding with ffmpeg:"
 	mkdir -p PPM_in
-	ffmpeg -i ../Dark-Room-Laser-Spot.mpeg PPM_in/DRLS%04d.ppm -threads 4
+	ffmpeg -i ../Dark-Room-Laser-Spot.mpeg -s 960x540 PPM_in/DRLS%04d.ppm -threads 4
 
 purge: 
 	make clean
 	echo "Purging:"
 	rm -rfi PGM_out PPM_in graymap.mp4
-	
+
