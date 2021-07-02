@@ -1,6 +1,6 @@
 /* ---------------------------------------------------------------------------- 
  * @file main.c
- * @brief converts a series of .ppm frames to .pgm frames based on G channel
+ * @brief Center of mass detection proof of concept 
  *
  * @author Jake Michael, jami1063@colorado.edu
  * @course ECEN 5763: EMVIA, Summer 2021
@@ -36,7 +36,7 @@ int main(int argc, char** argv)  {
     img = read_ppm(filename);
     if (!img) {
       printf("img ptr is NULL");
-      //return -1;
+      return -1;
     }
 
     // convert ppm to pgm using G channel
@@ -44,7 +44,7 @@ int main(int argc, char** argv)  {
     yeet_ppm(&img);
     if(!gray) {
       printf("ppm_to_pgm fail\n");
-      //return -1;
+      return -1;
     }
 
     // use median filter
@@ -52,20 +52,20 @@ int main(int argc, char** argv)  {
     yeet_pgm(&gray);
     if (!grayfilt) {
       printf("median_filter fail\n");
-      //return -1;
+      return -1;
     }
 
     // annotate COM based on thresh
     if (com_annotate(grayfilt, 235)) {
       printf("com_annotate fail\n");  
-      //return -1;
+      return -1;
     }
 
     // write pgm to output file
     sprintf(filename, "%s/DRLS%04d_out.pgm", OUTPUT_FOLDER, i);
     if(write_pgm(filename, grayfilt)) {
       printf("write_pgm fail\n");
-      //return -1;
+      return -1;
     }
 
     yeet_pgm(&grayfilt);

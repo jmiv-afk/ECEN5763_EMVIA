@@ -21,9 +21,6 @@ int rgb_diff(ppm_img_t *const frame, ppm_img_t *const bg, ppm_img_t *diff) {
   int temp;
   if (!frame || !bg || !diff) return -1;
 
-  // use openmp for speedup:
-#pragma omp parallel for num_threads(5) \
-  default(none) private(i, temp) shared(diff)
   for (i=0; i<bg->hres*bg->vres; i++) {
 
     // rgb subtraction on ea. channel and keep within 0-255 intensity
