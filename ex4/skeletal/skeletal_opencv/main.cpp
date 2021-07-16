@@ -22,6 +22,8 @@
 using namespace cv;
 using namespace std; 
 
+//#define BACKGROUND_ELIM
+
 // the main program
 int main(int argc, char **argv) {
 
@@ -31,6 +33,7 @@ int main(int argc, char **argv) {
   cvNamedWindow("binary", CV_WINDOW_AUTOSIZE);
   cvNamedWindow("skel", CV_WINDOW_AUTOSIZE);
 
+#ifdef BACKGROUND_ELIM
   // create Background Subtractor objects
   Ptr<BackgroundSubtractor> pBackSub;
   pBackSub = createBackgroundSubtractorMOG2(100, 16, false);
@@ -39,10 +42,21 @@ int main(int argc, char **argv) {
   VideoWriter video_out(
     "output.mp4",
     CV_FOURCC('m','p','4','v'),
+    3.4, // experimentally determined
+    Size(640, 480),
+    false
+  );
+#else
+
+  VideoWriter video_out(
+    "output.mp4",
+    CV_FOURCC('m','p','4','v'),
     1.2, // experimentally determined
     Size(640, 480),
     false
   );
+
+#endif
 
   // open default interface /dev/video0
   VideoCapture cap(0);
@@ -60,15 +74,17 @@ int main(int argc, char **argv) {
     cap >> frame;
     if( frame.empty() ) break;
 
+#ifndef BACKGROUND_ELIM
     // old code from Siewert:
     cvtColor(frame, gray, CV_BGR2GRAY);
     // binary threshold
     threshold(gray, binary, 127, 255, CV_THRESH_BINARY);
-    medianBlur(binary, mfblur, 11);
-
+    medianBlur(binary, mfblur, 7);
+#else 
     // Proposed new code using background elimination:
-    //pBackSub->apply(frame, binary);
-    //medianBlur(binary, mfblur, 1);
+    pBackSub->apply(frame, binary);
+    medianBlur(binary, mfblur, 7);
+#endif 
 
     // This section of code was adapted from the following post, which was
     // based in turn on the Wikipedia description of a morphological skeleton
