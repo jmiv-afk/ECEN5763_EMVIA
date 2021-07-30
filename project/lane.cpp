@@ -1,164 +1,268 @@
 /* ----------------------------------------------------------------------------
  * @file lane.cpp
- * @brief
+ * @brief 
  *
  * @author Jake Michael, jami1063@colorado.edu
  * @course ECEN 5763: EMVIA, Summer 2021
  * @resources
  *---------------------------------------------------------------------------*/
 
-#include "log.h"
 #include "lane.h"
 
-using namespace cv;
-
-// The following moving average filter was sourced from:
-// https://tttapa.github.io/Pages/Mathematics/Systems-and-Control-Theory/Digital-filters/Simple%20Moving%20Average/C++Implementation.html
-
-template <uint8_t N, class input_t = uint16_t, class sum_t = uint32_t>
-class SMA {
-  public:
-    input_t operator()(input_t input) {
-        sum -= previousInputs[index];
-        sum += input;
-        previousInputs[index] = input;
-        if (++index == N)
-            index = 0;
-        return (sum + (N / 2)) / N;
-    }
-
-    static_assert(
-        sum_t(0) < sum_t(-1),  // Check that `sum_t` is an unsigned type
-        "Error: sum data type should be an unsigned integer, otherwise, "
-        "the rounding operation in the return statement is invalid.");
-
-  private:
-    uint8_t index             = 0;
-    input_t previousInputs[N] = {};
-    sum_t sum                 = 0;
-};
-
-void lane_detect(Mat img, Mat* ret, Rect* roibox) {
+/* @brief the default lane detector constructor
+ *
+ * assumes 1280x720 color input images, and sets a pre-defined ROI 
+ */
+LaneDetector::LaneDetector(bool show_intermediate) {
   
-  Mat temp, roi;
-  static SMA<10> filter;
+  // set default ROI
+  // . . . . . . . . . . . . 
+  // . . (0) . . . . (1) . . 
+  // . . . + . . . . + . . . 
+  // . . . . . . . . . . . . 
+  // . . . + . . . . + . . .
+  // . . (3) . . . . (2) . .
+  // . . . . . . . . . . . . 
+  roi_pts[0] = Point(350, 430); // top left
+  roi_pts[1] = Point(750, 430); // top right
+  roi_pts[2] = Point(750, 567); // bottom right
+  roi_pts[3] = Point(350, 567); // bottom left
 
-  // crop the region of interest
-  crop_ROI(img, &roi, roibox);
+  // setup ROI mask (black rectangle with white quadrilateral)
+  //roi_mask = Mat::zeros(
+  //    roi_pts[3].y-roi_pts[0].y, // delta y -- rows
+  //    roi_pts[2].x-roi_pts[3].x, // delta x -- cols
+  //    CV_8U // type
+  //    );
+
+  //int sniplen = 100;
+  //assert(sniplen < roi_mask.cols && sniplen < roi_mask.rows);
+  //Point pts[6];
+  //pts[0] = Point(sniplen, 0); 
+  //pts[1] = Point(roi_mask.cols-1 - sniplen, 0);
+  //pts[2] = Point(roi_mask.cols-1, sniplen);
+  //pts[3] = Point(0, sniplen); 
   
-  // gaussian blur
-  blur(roi, roi, Size(3,3));
+  //fillConvexPoly(roi_mask, pts, 4, cv::Scalar(255) );
+
+  is_left_found = false;
+  is_right_found = false;
+  show_pipeline = show_intermediate;
+}
+
+/* @brief
+ *
+ */
+void LaneDetector::detect() {
+
+  Mat temp;
+  cvtColor(*raw, gray, COLOR_BGR2GRAY);
+  
+  // crop the region of interest - just a rectangular region for now
+  roi = gray(Rect(roi_pts[0], roi_pts[2]));
+
+  if (show_pipeline)
+    imshow("1", roi);
 
   // determine threshold using Otsu's adaptive threshold, slightly raise
-  int thresh = filter(threshold(roi, temp, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU) + 10);
-  threshold(roi, temp, thresh, 255, CV_THRESH_BINARY);
+  //int thresh = threshold(roi, temp, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU) + 10;
+  //threshold(roi, temp, thresh, 255, CV_THRESH_BINARY);
+  
+  medianBlur(roi, roi, 5);
 
-  //imshow("ROI-Binary", temp);
+  // use 3x3 mean adaptive threshold over binary image, slightly raise
+  adaptiveThreshold(roi, roi, 255, ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 5, -2);
+
+  // and in the mask to extract ROI
+  //bitwise_and(temp, roi_mask, roi);
+
+  if (show_pipeline)
+    imshow("2", roi);
 
   // Begin Hough transform algorithm
   std::vector<Vec4i> lines;
   Vec4i left, right;
-  int i = 0;
+  unsigned int i = 0;
 
   // detect the lines - from opencv tutorial
   HoughLinesP(
-      temp,          // image
+      roi,           // image
       lines,         // lines
       1,             // rho resolution of accumulator in pixels
-      //CV_PI/180,   // theta resolution of accumulator 
-      CV_PI/360,     // theta resolution of accumulator in pixels
-      20,            // accumulator threshold, only lines >threshold returned
-      80,            // minimum line length, lines shorter are rejected
-      100            // maximum line gap between points on the same line for linking
+      CV_PI/720,     // theta resolution of accumulator 
+      10,            // accumulator threshold, only lines >threshold returned
+      20,            // minimum line length, lines shorter are rejected
+      300            // maximum line gap between points on the same line for linking
   );
 
-
-  // don't do any detection if no lines are found
-  if (lines.size() == 0) {
-    *ret = temp;
-    return;
-  }
-
-  bool is_left_found = false;
-  bool is_right_found = false;
+  is_left_found = false;
+  is_right_found = false;
 
   while( !(is_left_found && is_right_found) ) {
 
+    if (i == lines.size()-1) {break;}
+
     Vec4i l = lines[i];
 
-    float angle = atan2( l[1]-l[3], l[0]-l[2]);
-    //float angle = atan( (l[1]-l[3])/(l[0]-l[2]) );
+    float angle = atan2( l[3]-l[1], l[2]-l[0] );
 
-    //std::cout << "0: " << l[0] << std::endl;
-    //std::cout << "1: " << l[1] << std::endl;
-    //std::cout << "2: " << l[2] << std::endl;
-    //std::cout << "3: " << l[3] << std::endl;
-    //std::cout << "theta: " << angle << std::endl;
-
-    // wrap to betw. 0 and PI
-    if (angle < 0) { angle += CV_PI; }
-    
     // perform some left/right filtering based on angle 
-    if (angle >= 1.57 && angle < 2.53 && !is_left_found ) {
+    //if (angle > 0.611 && angle < 1.57 && !is_left_found ) {
+    if (filter_by_angle(angle) == 'l' && !is_left_found) {
       left = lines[i];
       is_left_found = true;
-      //std::cout << "left: " <<  angle << std::endl;
     }
-    if (angle > 0.611 && angle < 1.57 && !is_right_found ) {
+    //if (angle >= 1.57 && angle < 2.53 && !is_right_found ) {
+    
+    if (filter_by_angle(angle) == 'r' && !is_right_found) {
       right = lines[i];
       is_right_found = true;
-      //std::cout << "right: " <<  angle << std::endl;
     }
     
-    if ( !(i++ < lines.size()) ) {break;}
-  
+    i++;
   }
 
   if (is_left_found) {
-    line( roi, Point(left[0], left[1]), Point(left[2], left[3]), Scalar(0,0,255), 3, LINE_AA);
+
+    Point2f ret;
+    Point2f pt1 = Point2f(left[0], left[1]);
+    Point2f pt2 = Point2f(left[2], left[3]);
+
+    //
+    // check ROI top side intersection with lane line
+    //
+    if(intersection(Point(0,0), Point(1, 0), pt1, pt2, ret)) {
+      // transform point into location in raw frame for annotation
+      left_pt1 = Point(round(ret.x), round(ret.y)) + roi_pts[0];
+    } else {
+      is_left_found = false;
+    }
+
+    //
+    // check ROI left side intersection with lane line
+    //
+    //found = intersection(Point(0,0), Point(0,1), pt1, pt2, ret);
+    //if (found && is_inside_roi(ret)) {
+    //  left_pt2 = Point(round(ret.x), round(ret.y));
+    //}
+
+    //
+    // check ROI bottom side intersection with lane line
+    //
+    if (intersection(Point(0,roi.rows-1), Point(1,roi.rows-1), pt1, pt2, ret)) {
+      // transform point into location in raw frame for annotation
+      left_pt2 = Point(round(ret.x), round(ret.y)) + roi_pts[0];
+    } else {
+      is_left_found = false;
+    }
+
   }
 
   if (is_right_found) {
-    line( roi, Point(right[0], right[1]), Point(right[2], right[3]), Scalar(0,0,255), 3, LINE_AA);
+    
+    Point2f ret;
+    Point2f pt1 = Point2f(right[0], right[1]);
+    Point2f pt2 = Point2f(right[2], right[3]);
+
+    //
+    // check ROI top side intersection with lane line
+    //
+    if (intersection(Point(0,0), Point(1,0), pt1, pt2, ret)) {
+      // transform point into location in raw frame for annotation
+      right_pt1 = Point(ret) + roi_pts[0];
+    } else {
+      is_right_found = false;
+    }
+
+    //
+    // check ROI right side intersection with lane line
+    //
+    //found = intersection(Point(roi.cols-1,0), Point(roi.cols-1,1), pt1, pt2, ret);
+    //if (found && is_inside_roi(ret)) {
+    //  right_pt2 = Point(round(ret.x), round(ret.y));
+    //} 
+
+    //
+    // check ROI bottom side intersection with lane line
+    //
+    if (intersection(Point(0,roi.rows-1), Point(1,roi.rows-1), pt1, pt2, ret)) {
+      // transform point into location in raw frame for annotation
+      right_pt2 = Point(ret) + roi_pts[0];
+    } else {
+      is_right_found = false;
+    }
   }
-  
 
-  *ret = roi;
+} // end detect()
+
+// does angle filtering to characterize as left or right
+char LaneDetector::filter_by_angle(float rad) {
+
+  // Note that rad is measured from the negative x-axis due to OpenCV
+  // column first notation and location of 0,0
+
+  if(rad<0) { rad+=CV_PI; }
+
+  if (rad>1.58825 && rad<2.443461) {
+    return 'l';
+  }
+
+  if (rad>0.698132 && rad<1.553343) {
+    return 'r';
+  }
+
+  return 'n';
 }
 
-void crop_ROI(Mat img, Mat* ret, Rect* roibox) {
 
-  Point topleft = Point(350, 430);
-  *roibox = Rect(topleft, Size(380, 140));
-  *ret = img(*roibox);
+// checks if a point is validly inside the raw image
+bool LaneDetector::is_inside_raw(Point p) {
+
+  if (0<=p.x && p.x<raw->cols && 0<=p.y && p.y<raw->rows) 
+    return true;
+  else
+    return false;
 }
 
-/*
-void lane_mask_rgb(Mat hls_img, Mat* ret) {
-  
-  Mat white, yellow, temp1, temp2;
-  
-  Mat mask = Mat::zeros(hls_img.rows, hls_img.cols, CV_8U);
+// Finds the intersection of two lines, or returns false.
+// The lines are defined by (o1, p1) and (o2, p2).
+//
+// sourced from: 
+// https://stackoverflow.com/questions/7446126/opencv-2d-line-intersection-helper-function
+//
+bool intersection(Point2f o1, Point2f p1, Point2f o2, Point2f p2, Point2f &r)
+{
+    Point2f x = o2 - o1;
+    Point2f d1 = p1 - o1;
+    Point2f d2 = p2 - o2;
 
-  //cout << "hres: " << hls_img.cols << endl;
-  //cout << "vres: " << hls_img.rows << endl;
+    float cross = d1.x*d2.y - d1.y*d2.x;
+    if (abs(cross) < /*EPS*/1e-8)
+        return false;
 
-  Point pts[4] = {
-    Point(280, 205),
-    Point(360, 205),
-    Point(451, 280),
-    Point(168, 280)
-  };
-  fillConvexPoly( mask, pts, 4, cv::Scalar(255) );
-
-  inRange(hls_img, Scalar(0, 90, 0), Scalar(255, 255, 255), white);
-  inRange(hls_img, Scalar(10, 0, 30), Scalar(80, 255, 255), yellow);
-  
-  cuda::bitwise_and(mask, white, temp1);
-  cuda::bitwise_and(mask, yellow, temp2);
-  cuda::bitwise_or(temp1, temp2, *ret);
-
-  //imshow("test", mask);
-  //while(waitKey(20) != 'q') {}
+    double t1 = (x.x * d2.y - x.y * d2.x)/cross;
+    r = o1 + d1 * t1;
+    return true;
 }
-*/
+
+void LaneDetector::annotate() {
+  
+  Mat annot = Mat(*raw);
+
+  if (is_left_found 
+      && is_inside_raw(left_pt1) 
+      && is_inside_raw(left_pt2) ) {
+    line(annot, left_pt1, left_pt2, Scalar(0,0,255), 3, LINE_4);
+  }
+
+  if (is_right_found
+      && is_inside_raw(right_pt1) 
+      && is_inside_raw(right_pt2) ) {
+    line(annot, right_pt1, right_pt2, Scalar(0,0,255), 3, LINE_4);
+  }
+
+  if (show_pipeline)
+    imshow("3", annot);
+}
+
+

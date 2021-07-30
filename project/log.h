@@ -34,6 +34,7 @@
 #define USEC_TO_NSEC (1000)
 #define MSEC_TO_NSEC (1000000)
 #define SEC_TO_NSEC  (1000000000)
+#define MSEC_TO_SEC  (1000)
 
 /* @brief  Gets the time in msec via CLOCK_MONOTONIC
  *
