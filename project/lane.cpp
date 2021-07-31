@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------------
- * @file lane.cpp
+ * @fileilane.cpp
  * @brief 
  *
  * @author Jake Michael, jami1063@colorado.edu
@@ -45,6 +45,8 @@ LaneDetector::LaneDetector(bool show_intermediate) {
   
   //fillConvexPoly(roi_mask, pts, 4, cv::Scalar(255) );
 
+  frame_num = 0;
+  lines_detected = 0;
   is_left_found = false;
   is_right_found = false;
   show_pipeline = show_intermediate;
@@ -80,47 +82,10 @@ void LaneDetector::detect() {
     imshow("2", roi);
 
   // Begin Hough transform algorithm
-  std::vector<Vec4i> lines;
   Vec4i left, right;
-  unsigned int i = 0;
 
-  // detect the lines - from opencv tutorial
-  HoughLinesP(
-      roi,           // image
-      lines,         // lines
-      1,             // rho resolution of accumulator in pixels
-      CV_PI/720,     // theta resolution of accumulator 
-      10,            // accumulator threshold, only lines >threshold returned
-      20,            // minimum line length, lines shorter are rejected
-      300            // maximum line gap between points on the same line for linking
-  );
-
-  is_left_found = false;
-  is_right_found = false;
-
-  while( !(is_left_found && is_right_found) ) {
-
-    if (i == lines.size()-1) {break;}
-
-    Vec4i l = lines[i];
-
-    float angle = atan2( l[3]-l[1], l[2]-l[0] );
-
-    // perform some left/right filtering based on angle 
-    //if (angle > 0.611 && angle < 1.57 && !is_left_found ) {
-    if (filter_by_angle(angle) == 'l' && !is_left_found) {
-      left = lines[i];
-      is_left_found = true;
-    }
-    //if (angle >= 1.57 && angle < 2.53 && !is_right_found ) {
-    
-    if (filter_by_angle(angle) == 'r' && !is_right_found) {
-      right = lines[i];
-      is_right_found = true;
-    }
-    
-    i++;
-  }
+  // run the Hough transform
+  hough_transform(left, right);
 
   if (is_left_found) {
 
@@ -137,14 +102,6 @@ void LaneDetector::detect() {
     } else {
       is_left_found = false;
     }
-
-    //
-    // check ROI left side intersection with lane line
-    //
-    //found = intersection(Point(0,0), Point(0,1), pt1, pt2, ret);
-    //if (found && is_inside_roi(ret)) {
-    //  left_pt2 = Point(round(ret.x), round(ret.y));
-    //}
 
     //
     // check ROI bottom side intersection with lane line
@@ -175,14 +132,6 @@ void LaneDetector::detect() {
     }
 
     //
-    // check ROI right side intersection with lane line
-    //
-    //found = intersection(Point(roi.cols-1,0), Point(roi.cols-1,1), pt1, pt2, ret);
-    //if (found && is_inside_roi(ret)) {
-    //  right_pt2 = Point(round(ret.x), round(ret.y));
-    //} 
-
-    //
     // check ROI bottom side intersection with lane line
     //
     if (intersection(Point(0,roi.rows-1), Point(1,roi.rows-1), pt1, pt2, ret)) {
@@ -195,19 +144,145 @@ void LaneDetector::detect() {
 
 } // end detect()
 
+// run a Hough transform to get left/right points
+// uses standard Hough
+void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
+
+  std::vector<Vec3f> lines;
+  unsigned int i=0;
+ 
+  is_left_found = false;
+  is_right_found = false;
+
+  // detects left lane lines:
+  HoughLines(
+      roi,           // image
+      lines,         // lines
+      1,             // rho resolution of accumulator in pixels
+      CV_PI/90,      // theta resolution of accumulator 
+      30,            // accumulator threshold, only lines >threshold returned
+      0,             // srn - set to 0 for classical Hough
+      0,             // stn - set to 0 for classical Hough
+      0,             // minimum theta 
+      1.134464       // maximum theta 
+  );
+
+  
+  while( !(is_left_found) && i < lines.size() ) {
+
+    // sourced from OpenCV Hough tutorial:
+    float rho = lines[i][0], theta = lines[i][1];
+    if (abs(rho) > 90 && abs(rho) < 150) {
+      //LOGP("rho: %f, theta: %f, votes: %f\n", rho, theta*180/CV_PI, lines[i][2]);
+      double a = cos(theta), b = sin(theta);
+      double x0 = a*rho, y0 = b*rho;
+      left[0] = cvRound(x0 + 1000*(-b));
+      left[1] = cvRound(y0 + 1000*(a));
+      left[2] = cvRound(x0 - 1000*(-b));
+      left[3] = cvRound(y0 - 1000*(a));
+      is_left_found = true;
+    }
+
+    i++;
+  }
+
+  lines.clear(); i=0;
+
+  // detects right lane lines:
+  HoughLines(
+      roi,           // image
+      lines,         // lines
+      1,             // rho resolution of accumulator in pixels
+      CV_PI/90,      // theta resolution of accumulator 
+      30,            // accumulator threshold, only lines >threshold returned
+      0,             // srn - set to 0 for classical Hough
+      0,             // stn - set to 0 for classical Hough
+      2.007129,      // minimum theta 
+      CV_PI          // maximum theta 
+  );
+
+  
+  while( !(is_right_found) && i < lines.size() ) {
+
+    // sourced from OpenCV Hough tutorial:
+    float rho = lines[i][0], theta = lines[i][1];
+    if ( abs(rho) > 230 && abs(rho) < 300) {
+      //LOGP("rho: %f, theta: %f, votes: %f\n", rho, theta*180/CV_PI, lines[i][2]);
+      double a = cos(theta), b = sin(theta);
+      double x0 = a*rho, y0 = b*rho;
+      right[0] = cvRound(x0 + 1000*(-b));
+      right[1] = cvRound(y0 + 1000*(a));
+      right[2] = cvRound(x0 - 1000*(-b));
+      right[3] = cvRound(y0 - 1000*(a));
+      is_right_found = true;
+    }
+
+    i++;
+  }
+
+}
+
+// run a Hough transform to get left/right points
+// uses probabalistic Hough
+void LaneDetector::hough_transform_P(Vec4i& left, Vec4i& right) {
+  
+  std::vector<Vec4i> lines;
+  unsigned int i=0; 
+
+  HoughLinesP(
+      roi,           // image
+      lines,         // lines
+      1,             // rho resolution of accumulator in pixels
+      CV_PI/180,     // theta resolution of accumulator 
+      10,            // accumulator threshold, only lines >threshold returned
+      20,            // minimum line length, lines shorter are rejected
+      300            // maximum line gap between points on the same line for linking
+  );
+
+  is_left_found = false;
+  is_right_found = false;
+
+  while( !(is_left_found && is_right_found) ) {
+
+    if (i == lines.size()-1) {break;}
+
+    Vec4i l = lines[i];
+
+    float angle = atan2( l[3]-l[1], l[2]-l[0] );
+
+    if (angle < 0) {
+      angle+=CV_PI;
+    }
+
+    // perform some left/right filtering based on angle 
+    if (filter_by_angle(angle) == 'l' && !is_left_found) {
+      left = lines[i];
+      is_left_found = true;
+    }
+    
+    if (filter_by_angle(angle) == 'r' && !is_right_found) {
+      right = lines[i];
+      is_right_found = true;
+    }
+    
+    i++;
+  }
+
+}
+
 // does angle filtering to characterize as left or right
 char LaneDetector::filter_by_angle(float rad) {
 
   // Note that rad is measured from the negative x-axis due to OpenCV
   // column first notation and location of 0,0
 
-  if(rad<0) { rad+=CV_PI; }
-
-  if (rad>1.58825 && rad<2.443461) {
+  if ( (rad>1.588250 && rad<2.443461) || 
+       (rad>4.729842 && rad<5.585054) ) {
     return 'l';
   }
 
-  if (rad>0.698132 && rad<1.553343) {
+  if ( (rad>0.698132 && rad<1.553343) || 
+       (rad>3.839724 && rad>4.694936) ) {
     return 'r';
   }
 
@@ -253,13 +328,17 @@ void LaneDetector::annotate() {
       && is_inside_raw(left_pt1) 
       && is_inside_raw(left_pt2) ) {
     line(annot, left_pt1, left_pt2, Scalar(0,0,255), 3, LINE_4);
+    lines_detected++;
   }
 
   if (is_right_found
       && is_inside_raw(right_pt1) 
       && is_inside_raw(right_pt2) ) {
     line(annot, right_pt1, right_pt2, Scalar(0,0,255), 3, LINE_4);
+    lines_detected++;
   }
+
+  frame_num++;
 
   if (show_pipeline)
     imshow("3", annot);
