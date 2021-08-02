@@ -156,12 +156,17 @@ void *process_thread(void *param) {
   double proc_time = detector.get_proc_elapsed();
 
   LOGP(
-      "proc_thread: frames: %i, msec total: %6.2f, FPS: %6.2f\n", 
-      nframes, end-start, nframes*1000/(end-start)
+       "proc_thread, frames: %i, msec total: %6.2f, FPS: %6.2f\n", 
+       nframes, end-start, nframes*1000/(end-start)
       );
 
-  LOGP("proc_thread: lane lines detected: %i\n", lines);
-  LOGP("processing time (msec): %6.2f\n", proc_time);
+  LOGP(
+       "proc_thread (msec), proc_min: %6.2f, proc_max: %6.2f\n", 
+       detector.get_proc_min(),
+       detector.get_proc_max()
+      );
+  LOGP("proc_thread (msec), total proc time: %6.2f\n", proc_time);
+  LOGP("proc_thread, lane lines detected: %i\n", lines);
 
   return nullptr;
 } 
@@ -176,44 +181,45 @@ void *write_thread(void* param) {
   double start, end, elapsed = 0.0;
 
   thread_params_t *arg = (thread_params_t*) param;
-  String* output_video = (String *) arg->payload;
-  String output_folder = output_video->substr(0, output_video->find_last_of("/"));
+  String* output_folder = (String *) arg->payload;
   char number[20];
   number[19] = '\0';
 
-  VideoWriter video_out(
-    *output_video,
-    CV_FOURCC('a','v','c','1'),
-    30.0, 
-    Size(1280, 720),
-    true
-  );
+  // does not work as expected: 
+  //VideoWriter video_out(
+  //  *output_video,
+  //  CV_FOURCC('a','v','c','1'),
+  //  30.0, 
+  //  Size(1280, 720),
+  //  true
+  //);
 
   while(!exit_signal_g) {
 
-    start = get_time_msec();
-
     if (annot_buf.Get(img)) {
     
+      start = get_time_msec();
+
       //video_out.write(img); 
       sprintf(number, "%08d.jpg", i);
-      ss << output_folder << "/" << number; 
+      ss << *output_folder << number; 
       //cout << ss.str() << endl;
       imwrite(ss.str(), img);
       ss.str("");
       ss.clear();
       i++;
-    }
 
-    end = get_time_msec();
-    elapsed += end-start;
+      end = get_time_msec();
+      elapsed += end-start;
+    } 
+
   }
   
-  LOGP("write_thread elapsed (msec): %6.2f\n", elapsed);
-  LOGP("write_thread throughput (FPS): %6.2f\n", i*1000/elapsed);
+  LOGP("write_thread (msec), total elapsed: %6.2f\n", elapsed);
+  LOGP("write_thread, FPS: %6.2f\n", i*1000/elapsed);
 
   // clean up
-  video_out.release();
+  //video_out.release();
 
   return nullptr;
 }
@@ -226,13 +232,13 @@ int main(int argc, char **argv) {
   // the keys for the command line arguments
   const String parser_keys =
     "{help h usage ? | | Print help message. }"
-    "{input i  | input_video/clip1.avi      | Full filepath to input video.  }"
-    "{output o | output_video/clip1_out.mp4 | Full filepath to output video. }"
+    "{input i  | input_video/clip1.avi       | Full filepath to input video.  }"
+    "{output o | output_frames/              | Folder for output video frames. }"
     "{show     | 1 | Shows intermediate image pipeline steps. }"
     ;
   // variables extracted from the parser - application settings
   String input_video;
-  String output_video;
+  String output_folder;
   int show_pipeline;
 
   // 
@@ -246,17 +252,21 @@ int main(int argc, char **argv) {
   }
 
   input_video = parser.get<String>("input");
-  output_video = parser.get<String>("output");
+  output_folder = parser.get<String>("output");
+
+  if (output_folder.find('/') == String::npos) {
+    // no ending '/' specified, append '/' to end
+    output_folder += '/';
+  }
+
   show_pipeline = parser.get<int>("show");
 
   if (show_pipeline) {
     cvNamedWindow("1", CV_WINDOW_AUTOSIZE);
     cvNamedWindow("2", CV_WINDOW_AUTOSIZE);
     cvNamedWindow("3", CV_WINDOW_AUTOSIZE);
-    cvNamedWindow("4", CV_WINDOW_AUTOSIZE);
   }
   
-
   signal(SIGINT, int_handler);
 
   // Begin pthreads setup
@@ -292,7 +302,7 @@ int main(int argc, char **argv) {
 
   // start the video writing thread
   thread_params[WRITE_THREAD].tid = 3;
-  thread_params[WRITE_THREAD].payload = (void*)(&output_video);
+  thread_params[WRITE_THREAD].payload = (void*)(&output_folder);
 
   pthread_create( &threads[WRITE_THREAD],
                   &rt_sched_attr[WRITE_THREAD],

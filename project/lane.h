@@ -75,6 +75,8 @@ class LaneDetector {
 
     // getters inline 
     double get_proc_elapsed() { return proc_elapsed; }
+    double get_proc_min() { return proc_min; }
+    double get_proc_max() { return proc_max; }
     unsigned int get_frame_num() { return frame_num; }
     unsigned int get_lines_detected() { return lines_detected; }
     void get_annot(Mat& annotated_return) { annotated_return = annot.clone(); }
