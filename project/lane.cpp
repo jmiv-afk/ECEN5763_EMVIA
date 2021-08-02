@@ -9,11 +9,11 @@
 
 #include "lane.h"
 
-/* @brief the default lane detector constructor
+/* @brief The default lane detector constructor
  *
- * assumes 1280x720 color input images, and sets a pre-defined ROI 
+ * assumes 1280x720 BGR color input images, and sets a pre-defined ROI 
  */
-LaneDetector::LaneDetector(bool show_intermediate) {
+LaneDetector::LaneDetector() {
   
   // set default ROI
   // . . . . . . . . . . . . 
@@ -28,58 +28,40 @@ LaneDetector::LaneDetector(bool show_intermediate) {
   roi_pts[2] = Point(750, 567); // bottom right
   roi_pts[3] = Point(350, 567); // bottom left
 
-  // setup ROI mask (black rectangle with white quadrilateral)
-  //roi_mask = Mat::zeros(
-  //    roi_pts[3].y-roi_pts[0].y, // delta y -- rows
-  //    roi_pts[2].x-roi_pts[3].x, // delta x -- cols
-  //    CV_8U // type
-  //    );
-
-  //int sniplen = 100;
-  //assert(sniplen < roi_mask.cols && sniplen < roi_mask.rows);
-  //Point pts[6];
-  //pts[0] = Point(sniplen, 0); 
-  //pts[1] = Point(roi_mask.cols-1 - sniplen, 0);
-  //pts[2] = Point(roi_mask.cols-1, sniplen);
-  //pts[3] = Point(0, sniplen); 
-  
-  //fillConvexPoly(roi_mask, pts, 4, cv::Scalar(255) );
-
   frame_num = 0;
   lines_detected = 0;
   is_left_found = false;
   is_right_found = false;
-  show_pipeline = show_intermediate;
 }
 
-/* @brief
+void LaneDetector::show() {
+  
+  imshow("1", roi);
+  imshow("2", annot);
+}
+
+/* @brief Detects left and right lane lines
  *
+ * Upon completion, the Points left_pt<i>, and right_pt<i> will be present
+ * denoting the location of the left and right lane lines in the raw frame.
+ * Also, if no lane lines were detected, the is_left_found and is_right_found
+ * booleans will be set. Frames can be annotated after detection.
+ *
+ * @param None
+ * @return None
  */
 void LaneDetector::detect() {
 
-  Mat temp;
   cvtColor(*raw, gray, COLOR_BGR2GRAY);
   
   // crop the region of interest - just a rectangular region for now
   roi = gray(Rect(roi_pts[0], roi_pts[2]));
 
-  if (show_pipeline)
-    imshow("1", roi);
-
-  // determine threshold using Otsu's adaptive threshold, slightly raise
-  //int thresh = threshold(roi, temp, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU) + 10;
-  //threshold(roi, temp, thresh, 255, CV_THRESH_BINARY);
-  
+  // apply median filter
   medianBlur(roi, roi, 5);
 
   // use 3x3 mean adaptive threshold over binary image, slightly raise
   adaptiveThreshold(roi, roi, 255, ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 5, -2);
-
-  // and in the mask to extract ROI
-  //bitwise_and(temp, roi_mask, roi);
-
-  if (show_pipeline)
-    imshow("2", roi);
 
   // Begin Hough transform algorithm
   Vec4i left, right;
@@ -97,7 +79,6 @@ void LaneDetector::detect() {
     // check ROI top side intersection with lane line
     //
     if(intersection(Point(0,0), Point(1, 0), pt1, pt2, ret)) {
-      // transform point into location in raw frame for annotation
       left_pt1 = Point(round(ret.x), round(ret.y)) + roi_pts[0];
     } else {
       is_left_found = false;
@@ -107,7 +88,6 @@ void LaneDetector::detect() {
     // check ROI bottom side intersection with lane line
     //
     if (intersection(Point(0,roi.rows-1), Point(1,roi.rows-1), pt1, pt2, ret)) {
-      // transform point into location in raw frame for annotation
       left_pt2 = Point(round(ret.x), round(ret.y)) + roi_pts[0];
     } else {
       is_left_found = false;
@@ -125,7 +105,6 @@ void LaneDetector::detect() {
     // check ROI top side intersection with lane line
     //
     if (intersection(Point(0,0), Point(1,0), pt1, pt2, ret)) {
-      // transform point into location in raw frame for annotation
       right_pt1 = Point(ret) + roi_pts[0];
     } else {
       is_right_found = false;
@@ -135,7 +114,6 @@ void LaneDetector::detect() {
     // check ROI bottom side intersection with lane line
     //
     if (intersection(Point(0,roi.rows-1), Point(1,roi.rows-1), pt1, pt2, ret)) {
-      // transform point into location in raw frame for annotation
       right_pt2 = Point(ret) + roi_pts[0];
     } else {
       is_right_found = false;
@@ -144,8 +122,18 @@ void LaneDetector::detect() {
 
 } // end detect()
 
-// run a Hough transform to get left/right points
-// uses standard Hough
+
+/* @brief Uses a standard hough transform to return coordinates of 
+ *        left/right lane lines
+ *
+ * Operates on the binary ROI image and uses certain bounds on rho and 
+ * theta for detecting left and right lane lines.
+ *
+ * @param left&, reference for the left lane line points - vectorized
+ * @param right&, reference for the right lane line points - vectorized 
+ *
+ * @return None
+ */
 void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
 
   std::vector<Vec3f> lines;
@@ -222,89 +210,24 @@ void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
 
 }
 
-// run a Hough transform to get left/right points
-// uses probabalistic Hough
-void LaneDetector::hough_transform_P(Vec4i& left, Vec4i& right) {
-  
-  std::vector<Vec4i> lines;
-  unsigned int i=0; 
+/* @brief Checks if the point is valid within the bounds of annot
+ */
+bool LaneDetector::is_inside_annot(Point p) {
 
-  HoughLinesP(
-      roi,           // image
-      lines,         // lines
-      1,             // rho resolution of accumulator in pixels
-      CV_PI/180,     // theta resolution of accumulator 
-      10,            // accumulator threshold, only lines >threshold returned
-      20,            // minimum line length, lines shorter are rejected
-      300            // maximum line gap between points on the same line for linking
-  );
-
-  is_left_found = false;
-  is_right_found = false;
-
-  while( !(is_left_found && is_right_found) ) {
-
-    if (i == lines.size()-1) {break;}
-
-    Vec4i l = lines[i];
-
-    float angle = atan2( l[3]-l[1], l[2]-l[0] );
-
-    if (angle < 0) {
-      angle+=CV_PI;
-    }
-
-    // perform some left/right filtering based on angle 
-    if (filter_by_angle(angle) == 'l' && !is_left_found) {
-      left = lines[i];
-      is_left_found = true;
-    }
-    
-    if (filter_by_angle(angle) == 'r' && !is_right_found) {
-      right = lines[i];
-      is_right_found = true;
-    }
-    
-    i++;
-  }
-
-}
-
-// does angle filtering to characterize as left or right
-char LaneDetector::filter_by_angle(float rad) {
-
-  // Note that rad is measured from the negative x-axis due to OpenCV
-  // column first notation and location of 0,0
-
-  if ( (rad>1.588250 && rad<2.443461) || 
-       (rad>4.729842 && rad<5.585054) ) {
-    return 'l';
-  }
-
-  if ( (rad>0.698132 && rad<1.553343) || 
-       (rad>3.839724 && rad>4.694936) ) {
-    return 'r';
-  }
-
-  return 'n';
-}
-
-
-// checks if a point is validly inside the raw image
-bool LaneDetector::is_inside_raw(Point p) {
-
-  if (0<=p.x && p.x<raw->cols && 0<=p.y && p.y<raw->rows) 
+  if (0<=p.x && p.x<annot.cols && 0<=p.y && p.y<annot.rows) 
     return true;
   else
     return false;
 }
 
-// Finds the intersection of two lines, or returns false.
-// The lines are defined by (o1, p1) and (o2, p2).
-//
-// sourced from: 
-// https://stackoverflow.com/questions/7446126/opencv-2d-line-intersection-helper-function
-//
+/* @brief Finds the intersection of two lines, or returns false.
+ * 
+ * @param Points, the lines are defined by points (o1, p1) and (o2, p2).
+ * @return r, the intersection point
+ * 
+ * @source 
+ * https://stackoverflow.com/questions/7446126/opencv-2d-line-intersection-helper-function
+ */
 bool intersection(Point2f o1, Point2f p1, Point2f o2, Point2f p2, Point2f &r)
 {
     Point2f x = o2 - o1;
@@ -320,28 +243,39 @@ bool intersection(Point2f o1, Point2f p1, Point2f o2, Point2f p2, Point2f &r)
     return true;
 }
 
+/*
+ * @brief Annotates a copy of the raw frame with lane lines
+ */
 void LaneDetector::annotate() {
   
-  Mat annot = Mat(*raw);
-
   if (is_left_found 
-      && is_inside_raw(left_pt1) 
-      && is_inside_raw(left_pt2) ) {
+      && is_inside_annot(left_pt1) 
+      && is_inside_annot(left_pt2) ) {
     line(annot, left_pt1, left_pt2, Scalar(0,0,255), 3, LINE_4);
     lines_detected++;
   }
 
   if (is_right_found
-      && is_inside_raw(right_pt1) 
-      && is_inside_raw(right_pt2) ) {
+      && is_inside_annot(right_pt1) 
+      && is_inside_annot(right_pt2) ) {
     line(annot, right_pt1, right_pt2, Scalar(0,0,255), 3, LINE_4);
     lines_detected++;
   }
 
   frame_num++;
 
-  if (show_pipeline)
-    imshow("3", annot);
+  proc_end = get_time_msec();
+  proc_elapsed += proc_end-proc_start;
+
 }
 
 
+/*
+ * @brief The raw image to use as input for the class
+ */
+void LaneDetector::input_image(Mat& img) {
+
+  proc_start = get_time_msec();
+  raw = &img;
+  annot = Mat(*raw);
+}

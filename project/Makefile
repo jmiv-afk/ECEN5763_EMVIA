@@ -9,7 +9,7 @@ SRCS= $(wildcard *.cpp)
 OBJS= $(SRCS:.cpp=.o) 
 
 CFLAGS= -Wall -O3 $(shell pkg-config --cflags opencv)
-LDFLAGS= $(shell pkg-config --libs opencv)
+LDFLAGS= $(shell pkg-config --libs opencv) -lpthread
 
 TARGET= main.out
 
@@ -27,4 +27,4 @@ clean:
 
 purge: 
 	make clean
-	rm -f output_frames/*
+	rm -f output_video/*

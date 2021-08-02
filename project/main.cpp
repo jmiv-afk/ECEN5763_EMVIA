@@ -12,37 +12,221 @@
 
 #include <stdlib.h>
 #include <iostream>
+#include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/video.hpp>
 #include <opencv2/core/utility.hpp>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/sysinfo.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <signal.h>
+#include <semaphore.h>
+#include <time.h>
 
 #include "log.h"
 #include "lane.h"
+#include "ringbuf.h"
 
 using namespace cv;
 using namespace std;
 
-// the keys for the command line arguments
-const String parser_keys =
-  "{help h usage ? | | Print help message. }"
-  "{input i  | input_video/clip1.avi      | Full filepath to input video.  }"
-  "{output o | output_video/clip1_out.avi | Full filepath to output video. }"
-  "{show     | 1 | Shows intermediate image pipeline steps. }"
-  ;
+enum {
+  CAPTURE_THREAD, 
+  PROCESS_THREAD,
+  WRITE_THREAD,
+  NUM_THREADS
+};
 
-// global variables extracted from the parser - application settings
-String input_video_g;
-String output_video_g;
+// Pthread variables
+pthread_t threads[NUM_THREADS];
+
+typedef struct {
+  int tid;
+  void* payload;
+} thread_params_t;
+
+thread_params_t thread_params[NUM_THREADS];
+pthread_attr_t rt_sched_attr[NUM_THREADS];
+pthread_attr_t main_attr;
+struct sched_param rt_param[NUM_THREADS];
+struct sched_param main_param;
+
+// lock-free SPSC ring buffers
+RingBuffer<Mat> raw_buf = RingBuffer<Mat>(8); 
+RingBuffer<Mat> annot_buf = RingBuffer<Mat>(8);
+//RingBuffer<Mat, 8> raw_buf; //= RingBuffer<Mat>(8); 
+//RingBuffer<Mat, 8> annot_buf; //= RingBuffer<Mat>(8);
+
+// 
+// interrupt handler for ctrl-c finish-up and output
+//
+static volatile int exit_signal_g = 0;
+static void int_handler(int signum) {
+  
+  exit_signal_g = true;
+}
+
+
+/* @brief
+ *
+ */
+void *capture_thread(void *param) {
+  
+  //
+  // algorithm begin  
+  //
+  double start;
+  double end;
+  double elapsed = 0.0;
+  unsigned int framecnt = 0;
+  // wait time is 1 msec
+  struct timespec wait_time = {0, 1*MSEC_TO_NSEC};
+
+  thread_params_t *arg = (thread_params_t*) param;
+
+  String *input_image = (String*) arg->payload;
+  VideoCapture cap(*input_image);
+  cap.set(CAP_PROP_POS_MSEC, 10000);
+
+  Mat temp;
+
+  while(!exit_signal_g) {
+
+    start = get_time_msec();
+    cap >> temp;
+    if( temp.empty() ) {
+      LOGSYS("capture_thread, cap empty, nframes: %i\n", framecnt);
+      break;
+    }
+
+    while (!raw_buf.Put(temp)) { 
+      if (nanosleep(&wait_time, NULL) < 0) {
+        perror("capture_thread nanosleep");
+      }
+    }
+
+    char user_input = waitKey(20);
+    if ( user_input == 'q' ) break;
+
+    framecnt++;
+    end = get_time_msec();
+    elapsed += end-start;
+    if (elapsed > 10*MSEC_TO_SEC) {break;}
+  }
+
+  exit_signal_g = 1;
+  cap.release();
+  
+  return nullptr;
+}
+
+void *process_thread(void *param) {
+
+  Mat image, annotated;
+  LaneDetector detector;
+  double start, end;
+  start = get_time_msec();
+
+  thread_params_t *arg = (thread_params_t*) param;
+
+  int *show_pipeline = (int *) arg->payload;
+
+  while(!exit_signal_g) {
+
+    if(raw_buf.Get(image)) {
+      detector.input_image(image);
+      detector.detect();
+      detector.annotate();
+      if (*show_pipeline) {
+        detector.show();
+      }
+      detector.get_annot(annotated);
+      while(!annot_buf.Put(annotated)) {;} 
+    }
+
+  }
+
+  end = get_time_msec();
+
+  unsigned int nframes = detector.get_frame_num();
+  unsigned int lines = detector.get_lines_detected();
+  double proc_time = detector.get_proc_elapsed();
+
+  LOGP(
+      "Frames: %i, msec total: %6.2f, FPS: %6.2f\n", 
+      nframes, end-start, nframes*1000/(end-start)
+      );
+
+  LOGP("Lane lines detected: %i\n", lines);
+  LOGP("Processing time (msec): %6.2f\n", proc_time);
+
+  return nullptr;
+} 
+
+
+void *write_thread(void* param) {
+
+  Mat img;
+  unsigned int i=0;
+  String output_frame_path;
+  stringstream ss;
+
+  thread_params_t *arg = (thread_params_t*) param;
+  String* output_video = (String *) arg->payload;
+  String output_folder = output_video->substr(0, output_video->find_last_of("/"));
+  char number[20];
+  number[19] = '\0';
+
+  VideoWriter video_out(
+    *output_video,
+    CV_FOURCC('M','P','4','V'),
+    30.0, 
+    Size(1280, 720),
+    false
+  );
+
+  while(!exit_signal_g) {
+
+    if (annot_buf.Get(img)) {
+    
+      video_out << img; 
+      sprintf(number, "%08d.jpg", i);
+      ss << output_folder << "/" << number; 
+      //cout << ss.str() << endl;
+      imwrite(ss.str(), img);
+      ss.str("");
+      ss.clear();
+      i++;
+    }
+  }
+  
+  // clean up
+  video_out.release();
+
+  return nullptr;
+}
 
 //
 // the main program
 //
 int main(int argc, char **argv) {
 
-  bool show_pipeline;
+  // the keys for the command line arguments
+  const String parser_keys =
+    "{help h usage ? | | Print help message. }"
+    "{input i  | input_video/clip1.avi      | Full filepath to input video.  }"
+    "{output o | output_video/clip1_out.mp4 | Full filepath to output video. }"
+    "{show     | 1 | Shows intermediate image pipeline steps. }"
+    ;
+  // variables extracted from the parser - application settings
+  String input_video;
+  String output_video;
+  int show_pipeline;
 
   // 
   // command line parsing for application settings  
@@ -54,10 +238,9 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  input_video_g = parser.get<String>("input");
-  output_video_g = parser.get<String>("output");
-  show_pipeline = parser.get<bool>("show");
-  
+  input_video = parser.get<String>("input");
+  output_video = parser.get<String>("output");
+  show_pipeline = parser.get<int>("show");
 
   if (show_pipeline) {
     cvNamedWindow("1", CV_WINDOW_AUTOSIZE);
@@ -65,46 +248,59 @@ int main(int argc, char **argv) {
     cvNamedWindow("3", CV_WINDOW_AUTOSIZE);
     cvNamedWindow("4", CV_WINDOW_AUTOSIZE);
   }
-
-  VideoCapture cap(input_video_g);
-  cap.set(CAP_PROP_POS_MSEC, 10000);
   
-  VideoWriter video_out(
-    output_video_g,
-    CV_FOURCC('M','J','P','G'),
-    cap.get(CAP_PROP_FPS), // experimentally determined
-    Size(cap.get(CAP_PROP_FRAME_WIDTH), cap.get(CAP_PROP_FRAME_HEIGHT)),
-    false
-  );
 
-  //
-  // algorithm begin  
-  //
-  unsigned int framecnt = 0;
-  double start = get_time_msec();
-  double prev = get_time_msec();
-  Mat raw;
-  LaneDetector detector(show_pipeline);
+  signal(SIGINT, int_handler);
 
-  while(1) {
+  // Begin pthreads setup
+  int rc;
 
-    cap >> raw;
-    if( raw.empty() ) break;
-
-    detector.input_image(raw);
-    detector.detect();
-    detector.annotate();
-
-    prev = get_time_msec();
-    framecnt++;
-    
-    char user_input = waitKey(10);
-    if ( user_input == 'q' ) break;
-    //while( user_input != 'n' ) { user_input = waitKey(10); }
-    if (prev-start > 10*MSEC_TO_SEC) {break;}
+  for (int i=0; i<NUM_THREADS; i++) {
+    rc = pthread_attr_init(&rt_sched_attr[i]);
+    if (rc != 0) {
+      perror("pthread_attr_init");
+    }
   }
 
-  LOGP("FPS: %6.3f\n", framecnt*1000/(prev-start) );
+  // start the capture thread
+  thread_params[CAPTURE_THREAD].tid = 1;
+  thread_params[CAPTURE_THREAD].payload = (void*)(&input_video);
+
+  pthread_create( &threads[CAPTURE_THREAD],
+                  &rt_sched_attr[CAPTURE_THREAD],
+                  capture_thread,
+                  &thread_params[CAPTURE_THREAD]
+                 );
+
+  
+  // start the processing thread
+  thread_params[PROCESS_THREAD].tid = 2;
+  thread_params[PROCESS_THREAD].payload = (void*)(&show_pipeline);
+
+  pthread_create( &threads[PROCESS_THREAD],
+                  &rt_sched_attr[PROCESS_THREAD],
+                  process_thread,
+                  &thread_params[PROCESS_THREAD]
+                 );
+
+  // start the video writing thread
+  thread_params[WRITE_THREAD].tid = 3;
+  thread_params[WRITE_THREAD].payload = (void*)(&output_video);
+
+  pthread_create( &threads[WRITE_THREAD],
+                  &rt_sched_attr[WRITE_THREAD],
+                  write_thread,
+                  &thread_params[WRITE_THREAD]
+                 );
+
+  
+  for (int i=0; i<NUM_THREADS; i++) {
+    pthread_join(threads[i], NULL);
+  }
 
   return 0;
 }
+
+
+
+

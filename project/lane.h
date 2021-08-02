@@ -25,11 +25,14 @@
 
 using namespace cv;
 
+/* @brief A lane line detection and processing class
+ */
 class LaneDetector {
 
   private:
 
     Mat* raw;     // raw image
+    Mat annot;    // annotated image
     Mat gray;     // grayscale image
     Mat roi;      // region of interest 
     Mat roi_mask; // the white mask for the region of interest
@@ -37,7 +40,7 @@ class LaneDetector {
     // rectangle which defines the roi within the raw frame
     Point roi_pts[4];
 
-    // lane detected points in raw frame
+    // lane detected points in frame, ready for drawing
     Point left_pt1;
     Point left_pt2; 
     Point right_pt1;
@@ -46,37 +49,38 @@ class LaneDetector {
     // metrics to track
     unsigned int frame_num;
     unsigned int lines_detected;
+    double proc_start;
+    double proc_end;
+    double proc_elapsed;
 
     // lane detection booleans
     bool is_left_found = false;
     bool is_right_found = false;
 
-    // show pipeline in annotation
-    bool show_pipeline;
-
     // a friend helper function
     friend bool intersection(Point2f o1, Point2f p1, 
                  Point2f o2, Point2f p2, Point2f& r);
     
-    // checks to see if a point is within bounds of raw image
-    bool is_inside_raw(Point p);
-
-    // filters by angle
-    char filter_by_angle(float angle);
+    // checks to see if a point is within bounds of annot image
+    bool is_inside_annot(Point p);
 
   public:
     
     // default constructor
-    LaneDetector() = delete;
-    LaneDetector(bool show);
+    LaneDetector();
 
-    // methods
-    void input_image(Mat& img) { raw = &img; }
+    // methods -- further explanation in lane.cpp 
+    void input_image(Mat& img);
     void detect();
     void annotate();
+    void show();
     void hough_transform(Vec4i& left, Vec4i& right);
-    void hough_transform_P(Vec4i& left, Vec4i& right);
 
+    // getters inline 
+    double get_proc_elapsed() { return proc_elapsed; }
+    unsigned int get_frame_num() { return frame_num; }
+    unsigned int get_lines_detected() { return lines_detected; }
+    void get_annot(Mat& annotated_return) { annotated_return = annot.clone(); }
 
 };
 
