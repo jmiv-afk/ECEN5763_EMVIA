@@ -1,10 +1,10 @@
 /* ----------------------------------------------------------------------------
- * @fileilane.cpp
- * @brief 
+ * @file lane.cpp
+ * @brief Lane line detection and annotation class definitions
  *
  * @author Jake Michael, jami1063@colorado.edu
  * @course ECEN 5763: EMVIA, Summer 2021
- * @resources
+ * @resources Learning OpenCV3 Tutorials
  *---------------------------------------------------------------------------*/
 
 #include "lane.h"
@@ -23,15 +23,22 @@ LaneDetector::LaneDetector() {
   // . . . + . . . . + . . .
   // . . (3) . . . . (2) . .
   // . . . . . . . . . . . . 
+  //roi_pts[0] = Point(350, 430); // top left
+  //roi_pts[1] = Point(750, 430); // top right
+  //roi_pts[2] = Point(750, 567); // bottom right
+  //roi_pts[3] = Point(350, 567); // bottom left
   roi_pts[0] = Point(350, 430); // top left
-  roi_pts[1] = Point(750, 430); // top right
-  roi_pts[2] = Point(750, 567); // bottom right
+  roi_pts[1] = Point(830, 430); // top right
+  roi_pts[2] = Point(830, 567); // bottom right
   roi_pts[3] = Point(350, 567); // bottom left
 
+  proc_min = DBL_MAX;
+  proc_max = 0.0;
   frame_num = 0;
   lines_detected = 0;
   is_left_found = false;
   is_right_found = false;
+  vcenter = 605; // approximate vertical center 
 }
 
 void LaneDetector::show() {
@@ -120,6 +127,7 @@ void LaneDetector::detect() {
     }
   }
 
+
 } // end detect()
 
 
@@ -147,8 +155,8 @@ void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
       roi,           // image
       lines,         // lines
       1,             // rho resolution of accumulator in pixels
-      CV_PI/90,      // theta resolution of accumulator 
-      30,            // accumulator threshold, only lines >threshold returned
+      CV_PI/180,     // theta resolution of accumulator 
+      40,            // accumulator threshold, only lines >threshold returned
       0,             // srn - set to 0 for classical Hough
       0,             // stn - set to 0 for classical Hough
       0,             // minimum theta 
@@ -181,8 +189,8 @@ void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
       roi,           // image
       lines,         // lines
       1,             // rho resolution of accumulator in pixels
-      CV_PI/90,      // theta resolution of accumulator 
-      30,            // accumulator threshold, only lines >threshold returned
+      CV_PI/180,     // theta resolution of accumulator 
+      40,            // accumulator threshold, only lines >threshold returned
       0,             // srn - set to 0 for classical Hough
       0,             // stn - set to 0 for classical Hough
       2.007129,      // minimum theta 
@@ -243,6 +251,10 @@ bool intersection(Point2f o1, Point2f p1, Point2f o2, Point2f p2, Point2f &r)
     return true;
 }
 
+#define RED    (Scalar( 96,  94, 211))
+#define GREEN  (Scalar( 91, 186, 132))
+#define YELLOW (Scalar( 61, 139, 148))
+#define BLACK  (Scalar( 83,  81,  84))
 /*
  * @brief Annotates a copy of the raw frame with lane lines
  */
@@ -251,20 +263,48 @@ void LaneDetector::annotate() {
   if (is_left_found 
       && is_inside_annot(left_pt1) 
       && is_inside_annot(left_pt2) ) {
-    line(annot, left_pt1, left_pt2, Scalar(0,0,255), 3, LINE_4);
+    line(annot, left_pt1, left_pt2, RED, 3, LINE_4);
     lines_detected++;
   }
 
   if (is_right_found
       && is_inside_annot(right_pt1) 
       && is_inside_annot(right_pt2) ) {
-    line(annot, right_pt1, right_pt2, Scalar(0,0,255), 3, LINE_4);
+    line(annot, right_pt1, right_pt2, RED, 3, LINE_4);
     lines_detected++;
+  }
+
+  unsigned int center_meas = (right_pt2.x + left_pt2.x)/2;
+  int offset = center_meas - vcenter;
+  Scalar tick_color;
+
+  line(annot, right_pt2, left_pt2, BLACK, LINE_8); 
+  Point tick_bottom = Point(vcenter, right_pt2.y);
+  Point center_meas_bottom = Point(center_meas, right_pt2.y); 
+  if (abs(offset) > (right_pt2.x-left_pt2.x)/4) {
+    tick_color = RED; 
+  } else if (abs(offset) > (right_pt2.x-left_pt2.x)/6) {
+    tick_color = YELLOW;
+  } else {
+    tick_color = GREEN;
+  }
+  line(annot, tick_bottom+Point(0, -8), tick_bottom+Point(0, 8), tick_color, LINE_4); 
+  
+  if (is_left_found && is_right_found) {
+    line(annot, center_meas_bottom+Point(0, -8), center_meas_bottom+Point(0, 8), RED, LINE_4); 
   }
 
   frame_num++;
 
   proc_end = get_time_msec();
+  if (proc_end-proc_start < proc_min) {
+    proc_min = proc_end-proc_start;
+    LOGSYS("proc_min: %6.2f, frame: %i", proc_min, frame_num);
+  }
+  if (proc_end-proc_start > proc_max) {
+    proc_max = proc_end-proc_start;
+    LOGSYS("proc_max: %6.2f, frame: %i", proc_max, frame_num);
+  }
   proc_elapsed += proc_end-proc_start;
 
 }

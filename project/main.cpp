@@ -57,8 +57,8 @@ struct sched_param rt_param[NUM_THREADS];
 struct sched_param main_param;
 
 // lock-free SPSC ring buffers
-RingBuffer<Mat> raw_buf = RingBuffer<Mat>(8); 
-RingBuffer<Mat> annot_buf = RingBuffer<Mat>(8);
+RingBuffer<Mat> raw_buf = RingBuffer<Mat>(16); 
+RingBuffer<Mat> annot_buf = RingBuffer<Mat>(16);
 //RingBuffer<Mat, 8> raw_buf; //= RingBuffer<Mat>(8); 
 //RingBuffer<Mat, 8> annot_buf; //= RingBuffer<Mat>(8);
 
@@ -80,9 +80,7 @@ void *capture_thread(void *param) {
   //
   // algorithm begin  
   //
-  double start;
-  double end;
-  double elapsed = 0.0;
+  double start, end, elapsed = 0.0;
   unsigned int framecnt = 0;
   // wait time is 1 msec
   struct timespec wait_time = {0, 1*MSEC_TO_NSEC};
@@ -116,7 +114,7 @@ void *capture_thread(void *param) {
     framecnt++;
     end = get_time_msec();
     elapsed += end-start;
-    if (elapsed > 10*MSEC_TO_SEC) {break;}
+    if (elapsed > 100*MSEC_TO_SEC) {break;}
   }
 
   exit_signal_g = 1;
@@ -158,12 +156,12 @@ void *process_thread(void *param) {
   double proc_time = detector.get_proc_elapsed();
 
   LOGP(
-      "Frames: %i, msec total: %6.2f, FPS: %6.2f\n", 
+      "proc_thread: frames: %i, msec total: %6.2f, FPS: %6.2f\n", 
       nframes, end-start, nframes*1000/(end-start)
       );
 
-  LOGP("Lane lines detected: %i\n", lines);
-  LOGP("Processing time (msec): %6.2f\n", proc_time);
+  LOGP("proc_thread: lane lines detected: %i\n", lines);
+  LOGP("processing time (msec): %6.2f\n", proc_time);
 
   return nullptr;
 } 
@@ -175,6 +173,7 @@ void *write_thread(void* param) {
   unsigned int i=0;
   String output_frame_path;
   stringstream ss;
+  double start, end, elapsed = 0.0;
 
   thread_params_t *arg = (thread_params_t*) param;
   String* output_video = (String *) arg->payload;
@@ -184,17 +183,19 @@ void *write_thread(void* param) {
 
   VideoWriter video_out(
     *output_video,
-    CV_FOURCC('M','P','4','V'),
+    CV_FOURCC('a','v','c','1'),
     30.0, 
     Size(1280, 720),
-    false
+    true
   );
 
   while(!exit_signal_g) {
 
+    start = get_time_msec();
+
     if (annot_buf.Get(img)) {
     
-      video_out << img; 
+      //video_out.write(img); 
       sprintf(number, "%08d.jpg", i);
       ss << output_folder << "/" << number; 
       //cout << ss.str() << endl;
@@ -203,8 +204,14 @@ void *write_thread(void* param) {
       ss.clear();
       i++;
     }
+
+    end = get_time_msec();
+    elapsed += end-start;
   }
   
+  LOGP("write_thread elapsed (msec): %6.2f\n", elapsed);
+  LOGP("write_thread throughput (FPS): %6.2f\n", i*1000/elapsed);
+
   // clean up
   video_out.release();
 

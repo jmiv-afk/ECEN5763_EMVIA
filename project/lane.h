@@ -13,13 +13,10 @@
 #include <stdint.h>
 #include <iostream>
 #include <vector>
-//#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/video.hpp>
-//#include <opencv2/cudaarithm.hpp>
-//#include <opencv2/cudaimgproc.hpp>
 
 #include "log.h"
 
@@ -49,13 +46,13 @@ class LaneDetector {
     // metrics to track
     unsigned int frame_num;
     unsigned int lines_detected;
-    double proc_start;
-    double proc_end;
-    double proc_elapsed;
+    double proc_min, proc_max;
+    double proc_start, proc_end, proc_elapsed;
 
-    // lane detection booleans
-    bool is_left_found = false;
-    bool is_right_found = false;
+    // lane detection
+    bool is_left_found, is_right_found;
+    unsigned int vcenter;
+    unsigned int offset;
 
     // a friend helper function
     friend bool intersection(Point2f o1, Point2f p1, 
