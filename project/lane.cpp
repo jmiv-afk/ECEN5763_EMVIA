@@ -23,14 +23,14 @@ LaneDetector::LaneDetector() {
   // . . . + . . . . + . . .
   // . . (3) . . . . (2) . .
   // . . . . . . . . . . . . 
-  //roi_pts[0] = Point(350, 430); // top left
-  //roi_pts[1] = Point(750, 430); // top right
-  //roi_pts[2] = Point(750, 567); // bottom right
-  //roi_pts[3] = Point(350, 567); // bottom left
   roi_pts[0] = Point(350, 430); // top left
-  roi_pts[1] = Point(830, 430); // top right
-  roi_pts[2] = Point(830, 567); // bottom right
+  roi_pts[1] = Point(750, 430); // top right
+  roi_pts[2] = Point(750, 567); // bottom right
   roi_pts[3] = Point(350, 567); // bottom left
+  //roi_pts[0] = Point(350, 430); // top left
+  //roi_pts[1] = Point(830, 430); // top right
+  //roi_pts[2] = Point(830, 567); // bottom right
+  //roi_pts[3] = Point(350, 567); // bottom left
 
   proc_min = DBL_MAX;
   proc_max = 0.0;
@@ -67,7 +67,7 @@ void LaneDetector::detect() {
   // apply median filter
   medianBlur(roi, roi, 5);
 
-  // use 3x3 mean adaptive threshold over binary image, slightly raise
+  // use 5x5 mean adaptive threshold over binary image, slightly raise
   adaptiveThreshold(roi, roi, 255, ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 5, -2);
 
   // Begin Hough transform algorithm
@@ -142,6 +142,7 @@ void LaneDetector::detect() {
  *
  * @return None
  */
+#define ACC_THRESH (30)
 void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
 
   std::vector<Vec3f> lines;
@@ -156,10 +157,10 @@ void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
       lines,         // lines
       1,             // rho resolution of accumulator in pixels
       CV_PI/180,     // theta resolution of accumulator 
-      40,            // accumulator threshold, only lines >threshold returned
+      ACC_THRESH,    // accumulator threshold, only lines >threshold returned
       0,             // srn - set to 0 for classical Hough
       0,             // stn - set to 0 for classical Hough
-      0,             // minimum theta 
+      0.174533,      // minimum theta 
       1.134464       // maximum theta 
   );
 
@@ -190,11 +191,11 @@ void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
       lines,         // lines
       1,             // rho resolution of accumulator in pixels
       CV_PI/180,     // theta resolution of accumulator 
-      40,            // accumulator threshold, only lines >threshold returned
+      ACC_THRESH,    // accumulator threshold, only lines >threshold returned
       0,             // srn - set to 0 for classical Hough
       0,             // stn - set to 0 for classical Hough
       2.007129,      // minimum theta 
-      CV_PI          // maximum theta 
+      2.967060       // maximum theta 
   );
 
   
@@ -202,7 +203,7 @@ void LaneDetector::hough_transform(Vec4i& left, Vec4i& right) {
 
     // sourced from OpenCV Hough tutorial:
     float rho = lines[i][0], theta = lines[i][1];
-    if ( abs(rho) > 230 && abs(rho) < 300) {
+    if ( abs(rho) > 150 && abs(rho) < 300) {
       //LOGP("rho: %f, theta: %f, votes: %f\n", rho, theta*180/CV_PI, lines[i][2]);
       double a = cos(theta), b = sin(theta);
       double x0 = a*rho, y0 = b*rho;
@@ -253,6 +254,7 @@ bool intersection(Point2f o1, Point2f p1, Point2f o2, Point2f p2, Point2f &r)
 
 #define RED    (Scalar( 96,  94, 211))
 #define GREEN  (Scalar( 91, 186, 132))
+#define BLUE   (Scalar(203, 147, 114))
 #define YELLOW (Scalar( 61, 139, 148))
 #define BLACK  (Scalar( 83,  81,  84))
 /*
@@ -274,15 +276,21 @@ void LaneDetector::annotate() {
     lines_detected++;
   }
 
+  // annotate ROI
+  rectangle(annot, roi_pts[0], roi_pts[2], BLUE, 1, LINE_AA);  
+  putText(annot, "ROI", roi_pts[0], FONT_HERSHEY_SIMPLEX, 0.5, BLUE, 1.5);
+
   unsigned int center_meas = (right_pt2.x + left_pt2.x)/2;
   int offset = center_meas - vcenter;
   Scalar tick_color;
 
+  // annotate bottom black line
   line(annot, right_pt2, left_pt2, BLACK, LINE_8); 
   Point tick_bottom = Point(vcenter, right_pt2.y);
   Point center_meas_bottom = Point(center_meas, right_pt2.y); 
   if (abs(offset) > (right_pt2.x-left_pt2.x)/4) {
     tick_color = RED; 
+    putText(annot, "!", roi_pts[1], FONT_HERSHEY_SIMPLEX, 0.5, RED, 1.5);
   } else if (abs(offset) > (right_pt2.x-left_pt2.x)/6) {
     tick_color = YELLOW;
   } else {
@@ -305,6 +313,7 @@ void LaneDetector::annotate() {
     proc_max = proc_end-proc_start;
     LOGSYS("proc_max: %6.2f, frame: %i", proc_max, frame_num);
   }
+  LOGSYS("MVPROC %6.2f", get_time_msec()); 
   proc_elapsed += proc_end-proc_start;
 
 }

@@ -12,6 +12,7 @@
 
 #include <stdlib.h>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -114,7 +115,9 @@ void *capture_thread(void *param) {
     framecnt++;
     end = get_time_msec();
     elapsed += end-start;
-    if (elapsed > 100*MSEC_TO_SEC) {break;}
+
+    // uncomment if you only want a fixed amount of time
+    //if (elapsed > 20*MSEC_TO_SEC) {break;}
   }
 
   exit_signal_g = 1;
@@ -234,12 +237,15 @@ int main(int argc, char **argv) {
     "{help h usage ? | | Print help message. }"
     "{input i  | input_video/clip1.avi       | Full filepath to input video.  }"
     "{output o | output_frames/              | Folder for output video frames. }"
-    "{show     | 1 | Shows intermediate image pipeline steps. }"
+    "{show     | 0 | Shows intermediate image pipeline steps. }"
+    "{frame-analysis-mode | 0 | Displayes images from the output folder with key commands: \n \t\t n (next), p (previous) and q (quit). }"
     ;
   // variables extracted from the parser - application settings
   String input_video;
   String output_folder;
+  int frame_analysis_mode;
   int show_pipeline;
+
 
   // 
   // command line parsing for application settings  
@@ -257,6 +263,57 @@ int main(int argc, char **argv) {
   if (output_folder.find('/') == String::npos) {
     // no ending '/' specified, append '/' to end
     output_folder += '/';
+  }
+
+  frame_analysis_mode = parser.get<int>("frame-analysis-mode");
+
+  if (frame_analysis_mode) {
+
+    // mode which simply does frame-by-frame analysis (on preset frame sequence)
+    cvNamedWindow("frame-analysis", CV_WINDOW_AUTOSIZE);
+    Mat temp;
+    String filename;
+    ifstream file;
+    char number_ext[15];
+    int i=0;
+
+    while (!exit_signal_g) {
+
+      sprintf(number_ext, "%08d.jpg", i);
+      String filename = output_folder + number_ext;
+      cout << number_ext << endl;
+
+      Mat temp = imread(filename);
+      if (temp.empty()) {
+        exit_signal_g = 1;
+        break;
+      }
+
+      imshow("frame-analysis", temp);
+
+      char user_input = waitKey(0);
+      
+      switch(user_input) {
+      
+        case 'n':
+        case 'N':
+          i++;
+          break;
+
+        case 'p':
+        case 'P':
+          if (i>0) {i--;}
+          break;
+
+        case 'q':
+        case 'Q':
+          exit_signal_g = 1;
+          break;
+      }
+
+    }
+    
+    return 0;
   }
 
   show_pipeline = parser.get<int>("show");
