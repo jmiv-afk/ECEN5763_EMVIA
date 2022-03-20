@@ -13,3 +13,5 @@ This code was developed for the Jetson Nano development kit. It utilizes:
 
 For Jetson setup, see [Getting Started with Jetson Nano](https://developer.nvidia.com/embedded/learn/get-started-jetson-nano-devkit#intro).
 
+### Project
+Take a look at my [Final Project](project) for more complete documentation on my project. 
